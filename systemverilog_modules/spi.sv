@@ -21,6 +21,7 @@ case(present_state)
 	idle: next_state = enable ? collect : idle; 			
 	collect: next_state = transmit;	
 	transmit: next_state = (bit_cnt < 7) ? transmit : idle;
+	default: next_state = idle;
 endcase
 
 // ready signal to controller
@@ -29,6 +30,7 @@ case(present_state)
 	idle: ready = 1'b1;
 	collect: ready = 1'b0;
 	transmit: ready = 1'b0;
+	default: ready = 1'b0;
 endcase
 
 // Data collection, shifting and bit-counting

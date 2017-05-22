@@ -1,7 +1,7 @@
 module bin2bcd_testbench;
 
 logic [7:0] in;
-logic [3:0] tens, ones;
+logic [3:0] hundreds, tens, ones;
 logic clk, nrst, start, done;
 
 

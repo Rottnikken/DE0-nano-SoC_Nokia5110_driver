@@ -1,0 +1,171 @@
+module memory_updater(
+input logic [47:0] mem_in,
+input logic [7:0] destination, position, speed, distance,
+input logic [3:0] bcd_tens, bcd_ones,
+input logic [1:0] junction,
+input logic clk, nrst, done,
+output logic [47:0] mem_out,
+output logic [7:0] mem_addr, bcd_out,
+output logic mem_wren, start
+);
+
+logic [47:0] digit_one, digit_two;
+logic [7:0] val_reg [3:0];
+logic [2:0] junc_reg;
+logic [3:0] tens_reg;
+logic [3:0] ones_reg;
+logic [1:0] counter;
+logic [1:0] digit_count; // used to stay in same state for several clock cycles for read/write to RAM
+logic fin;
+
+enum {load, convert, check_count, readmem, writemem} state;
+
+
+always_ff @(posedge clk, negedge nrst)
+if(~nrst)
+begin
+	state <= load;
+	for(int i=0; i<4; i++) val_reg[i] <= '0;
+	tens_reg <= '0;
+	ones_reg <= '0;
+	digit_one <= '0;
+	digit_two <= '0;
+	junc_reg <= '0;
+	counter <= '0;
+	digit_count <= '0; 
+	mem_addr <= 1'b0;
+	mem_wren <= 1'b0;
+	mem_out <= '0;
+	bcd_out <= '0;
+	start <= 1'b0;
+	fin <= 1'b0;
+end
+else
+begin
+	case(state)
+		load: begin // load input values into register
+			val_reg[0] <= destination;
+			val_reg[1] <= position;
+			val_reg[2] <= distance;
+			val_reg[3] <= speed;
+			state <= convert;
+		end
+		
+		convert: begin // convert values to BCD format
+			if(~done)
+			begin
+				bcd_out <= val_reg[counter];
+				start <= 1'b1;
+				state <= convert;
+			end
+			else // value has been converted
+			begin
+				start <= 1'b0;
+				tens_reg <= bcd_tens;
+				ones_reg <= bcd_ones;
+				state <= readmem;
+			end
+		end
+		
+		// digit memory index = 84 + digit, ex. '3'-> 84+3=87
+		readmem: begin // read the two digits from memory
+			if(~fin) // currently dealing with first digit
+				if(digit_count < 3)
+				begin
+					mem_addr <= 84 + tens_reg;
+					state <= readmem;
+					digit_count = digit_count + 1;
+				end
+				else
+				begin
+					digit_two <= mem_in; 
+					digit_count <= '0;
+					fin <= 1'b1;
+					state <= readmem;
+				end
+			else
+				if(digit_count < 3)
+				begin
+					mem_addr <= 84 + ones_reg;
+					state <= readmem;
+					digit_count = digit_count + 1;
+				end
+				else
+				begin
+					digit_one <= mem_in; 
+					digit_count <= '0;
+					fin <= 1'b0;
+					state <= writemem;
+				end				
+		end
+	
+		writemem: begin // update the bitmap
+			if(~fin) // currently dealing with first digit
+				if(digit_count < 3)
+				begin
+					case(counter)
+					0:
+						mem_addr <= 5; // address of digit on LCD
+					1:
+						mem_addr <= 19; // address of digit on LCD
+					2:
+						mem_addr <= 77; // address of digit on LCD
+					3:
+						mem_addr <= 48; // address of digit on LCD
+					endcase
+					mem_out <= digit_one;
+					mem_wren <= 1'b1;
+					state <= writemem;
+					digit_count = digit_count + 1;
+				end
+				else
+				begin
+					digit_count <= '0;
+					fin <= 1'b1;
+					mem_wren <= 1'b0;
+					state <= writemem;
+				end
+			else
+				if(digit_count < 3)
+				begin
+					case(counter)
+					0:
+						mem_addr <= 4; // address of digit on LCD
+					1:
+						mem_addr <= 18; // address of digit on LCD
+					2:
+						mem_addr <= 76; // address of digit on LCD
+					3:
+						mem_addr <= 47; // address of digit on LCD
+					endcase
+					
+					
+					mem_out <= digit_two; 
+					digit_count = digit_count + 1;
+					mem_wren <= 1'b1;
+					state <= writemem;
+				end
+				else
+				begin
+					digit_count <= '0;
+					fin <= 1'b0;
+					mem_wren <= 1'b0;
+					state <= check_count;
+				end		
+			end
+		
+		check_count: begin
+			if(counter == 3) // all four values have been updated
+			begin
+				state <= load;
+				counter <= '0;
+			end
+			else
+			begin
+				state <= convert;
+				counter <= counter + 1;
+			end
+		end		
+	endcase
+end
+endmodule

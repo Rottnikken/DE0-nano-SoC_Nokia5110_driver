@@ -1,0 +1,60 @@
+module lcd_driver(
+input logic CLOCK_50, nrst, speed_control, // 50MHz clock
+input logic [7:0] destination, position, 
+input logic [7:0] speed, distance,
+input logic [1:0] junction,
+output logic spi_sck, spi_mosi, spi_dc, spi_cs, spi_reset // SPI signals to LCD
+);
+
+
+logic clk;
+assign clk = CLOCK_50;
+
+logic [47:0] mem_data_in_a, mem_data_out_a, mem_data_in_b, mem_data_out_b;
+logic [47:0] SPI_data;
+logic [6:0] mem_address_a, mem_address_b;
+logic wren_a, wren_b;
+
+// disable write functionality for RAM port A
+assign wren_a = 1'b0;
+assign mem_data_in_a = '0;
+
+logic SPI_enable, SPI_mode, SPI_ready, SPI_clk;
+
+logic [7:0] bcd_out;
+logic [3:0] tens, ones;
+logic start, done;
+
+// binary to BCD converter
+bin2bcd BCD1 (.clk(clk), .nrst(nrst), .in(bcd_out), .start(start), .tens(tens), .ones(ones), .done(done));
+
+// Memory bitmap manipulator
+memory_updater MU(.mem_in(mem_data_out_b), .destination(destination), 
+						.position(position), .speed(speed), .distance(distance), 
+						.bcd_tens(tens), .bcd_ones(ones), .junction(junction), .clk(clk), .nrst(nrst),
+						.done(done), .mem_out(mem_data_in_b), .mem_addr(mem_address_b), 
+						.bcd_out(bcd_out), .mem_wren(wren_b), .start(start));
+						
+// spi controller
+spi_controller SC1(mem_data_out_a, clk, nrst, SPI_ready, SPI_data, mem_address_a, SPI_enable, SPI_mode);
+
+// spi clk generator
+clk_div SCG1(.clk(clk), .nrst(nrst), .slow_clk(SPI_clk));
+
+// spi data path		
+spi SPI1(SPI_data, SPI_clk, nrst, SPI_enable, SPI_mode, spi_sck, spi_mosi, spi_dc, spi_cs, spi_reset, SPI_ready);
+
+// memory containing LCD bitmap
+	lcd_ram R(
+	.address_a(mem_address_a),
+	.address_b(mem_address_b),
+	.clock(clk),
+	.data_a(mem_data_in_a),
+	.data_b(mem_data_in_b),
+	.wren_a(wren_a),
+	.wren_b(wren_b),
+	.q_a(mem_data_out_a),
+	.q_b(mem_data_out_b)
+	);
+
+endmodule

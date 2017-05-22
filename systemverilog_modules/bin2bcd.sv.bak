@@ -1,0 +1,90 @@
+module bin2bcd(
+input clk, nrst,
+input [7:0] in,
+input start,
+output [3:0] tens, ones,
+output done
+);
+
+enum{idle, shift, check_shift, add, finished} state;   
+   
+logic [7:0] in_val;
+logic [3:0] tens_val, ones_val;
+logic [3:0] cnt, digit_cnt, bcd_digit;                       
+logic done_val;
+
+assign tens = tens_val;
+assign ones = ones_val;
+assign done = done_val;
+
+always @(posedge clk, negedge nrst)
+if(~nrst)
+begin
+	in_val <= '0;
+	done_val <= 1'b0;
+	tens_val <= '0;
+	ones_val <= '0;
+	cnt <= '0;
+end
+else
+begin 
+	case (state) 
+		idle: begin
+            if (start && ~done_val)
+            begin
+				in_val <= in;
+                state <= shift;
+				tens_val <= '0;
+				ones_val <= '0;
+				cnt <= '0;
+            end
+            else
+			begin
+				state <= idle;
+				if(~start && done_val)
+					done_val <= 1'b0;
+			end
+		end
+                 
+        shift: begin
+			tens_val <= {tens_val[2:0], ones_val[3]};
+			ones_val <= {ones_val[2:0], in_val[7]};
+			in_val <= in_val << 1;
+            state <= check_shift;
+        end          
+         
+        check_shift:
+        begin
+			if (cnt == 7)
+            begin
+				cnt <= 0;
+                state <= finished;
+              end
+            else
+              begin
+                cnt <= cnt + 1;
+                state <= add;
+              end
+          end
+  
+        add:
+          begin
+            if (tens_val > 4)                                    
+				tens_val <= tens_val + 3;
+			if(ones_val > 4)	
+				ones_val <= ones_val + 3;
+            state <= shift; 
+          end       
+        
+        finished:
+          begin
+            done_val <= 1'b1;
+            state <= idle;
+          end
+         
+        default :
+          state <= idle;
+            
+      endcase
+    end
+endmodule

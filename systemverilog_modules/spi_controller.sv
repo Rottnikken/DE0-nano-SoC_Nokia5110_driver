@@ -1,0 +1,91 @@
+module spi_controller(
+input logic [47:0] data_in,
+input logic clk, nrst,
+output logic [6:0] mem_address,
+output logic SCK, MOSI, DC, CS, LCD_reset // SPI outputs
+);
+
+logic enable, mode, ready, SPI_clk;
+
+// clock divider for SPI
+clk_div #(6) CD1(.clk(clk), .nrst(nrst), .slow_clk(SPI_clk));
+
+// spi module
+spi SPI1(.data(reg_data[0]), .clk(SPI_clk), .nrst(nrst), .enable(enable), .mode(mode), .ready(ready), 
+			.SCK(SCK), .MOSI(MOSI), .DC(DC), .CS(CS), .LCD_reset(LCD_reset));
+
+// internal buffers
+logic [7:0] reg_data[5:0]; // data collected in 48-bit chunks and separated into 8-bit chunks
+logic [6:0] mem_addr_i; // address of current block of bitmap being sent
+logic [2:0] byte_cnt; 
+
+// State machine
+enum {init, idle, collect1, collect2, transmit} present_state, next_state;
+always_ff @(posedge clk, negedge nrst)
+	present_state = ~nrst ? init : next_state;
+
+// Next state logic
+always_comb
+case(present_state)
+		init: next_state = (byte_cnt < 6) ? init : idle;
+		idle: next_state = collect1;
+		collect1: next_state = collect2;
+		collect2: next_state = transmit;
+		transmit: next_state = (byte_cnt < 6) ? transmit : idle;
+endcase
+
+
+always_ff @(posedge clk, negedge nrst)
+    if (~nrst) 
+	begin
+		// init cmds to LCD as reset value for buffer
+		reg_data[0] <= 8'b00001100; //
+		reg_data[1] <= 8'b00100000; //
+		reg_data[2] <= 8'b00010100; //
+		reg_data[3] <= 8'b00000100; //
+		reg_data[4] <= 8'b11000000; //
+		reg_data[5] <= 8'b00100011; //
+		enable <= 1'b0;
+		byte_cnt <= '0;
+		mem_addr_i = '0; 
+	end
+    else
+	begin
+		case(present_state)
+			init:
+				if(ready && ~enable) // wait for ready signal from SPI module
+					enable <= 1'b1;
+				else if(~ready && enable)
+				begin
+					enable <= 1'b0;
+					reg_data[0] <= reg_data[5];
+					for(int i=5;i>0;i--) reg_data[i-1] <= reg_data[i];
+					byte_cnt <= byte_cnt + 1;
+				end
+			idle: byte_cnt <= '0;
+			collect1: mem_addr_i <= (mem_addr_i > 7'b010010) ? '0 : (mem_addr_i + 1);		
+			collect2: begin
+				reg_data[0] <= data_in[47:40];
+				reg_data[1] <= data_in[39:32];
+				reg_data[2] <= data_in[31:24];
+				reg_data[3] <= data_in[23:16];
+				reg_data[4] <= data_in[15:8];
+				reg_data[5] <= data_in[7:0];
+			end
+
+			transmit:
+				if(ready && ~enable) // ready signal received, assert enable
+					enable <= 1'b1;
+				else if(~ready && enable) // byte received by SPI, disassert enable
+				begin
+					enable <= 1'b0;
+					reg_data[0] <= reg_data[5]; // Rotate registers to send next byte
+					for(int i=5;i>0;i--) reg_data[i-1] <= reg_data[i];
+					byte_cnt <= byte_cnt + 1;
+				end
+		endcase	
+	end
+	
+	assign mode = (present_state == init) ? 1'b0: 1'b1;
+	assign mem_address = mem_addr_i;
+endmodule 
